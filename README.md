@@ -1,0 +1,2 @@
+# hardware_info
+PCのCPU
