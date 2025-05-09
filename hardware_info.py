@@ -5,6 +5,7 @@ import GPUtil
 from cpuinfo import get_cpu_info
 import time
 import math
+import wmi
 
 def get_cpu_info_details():
     cpu_info = get_cpu_info()
@@ -24,7 +25,7 @@ def get_memory_info():
         "Used Memory (%)": mem.percent
     }
 
-def get_gpu_info():#gpu 詳細表示(現在はNVIDIAGPUのみ)
+def get_gpu_info():
     info = {}
     try:
         gpus = GPUtil.getGPUs()
@@ -41,12 +42,24 @@ def get_gpu_info():#gpu 詳細表示(現在はNVIDIAGPUのみ)
         info["NVIDIA GPU Error"] = f"Error: {str(e)}"
     return info
 
+def get_storage_info():
+    info = {}
+    try:
+        c = wmi.WMI()
+        for i, disk in enumerate(c.Win32_DiskDrive()):
+            info[f"Storage {i} Model"] = disk.Model
+            info[f"Storage {i} Interface"] = disk.InterfaceType
+            info[f"Storage {i} Size (GB)"] = round(int(disk.Size) / (1024**3), 2)
+            # NVMeバージョン等はWMIでは困難
+    except Exception as e:
+        info["Storage Error"] = f"Error: {str(e)}"
+    return info
+
 def simple_cpu_benchmark(duration=1.0):
-    """指定秒数だけCPUに負荷をかけて回数をスコアに変換(任意に変更可)"""
     start_time = time.time()
     count = 0
     while time.time() - start_time < duration:
-        for i in range(1, 1000):#計算量の調整(いじりすぎるとスコアが意味をなさなくなるので注意)
+        for i in range(1, 1000):
             _ = i * i
             _ = math.sqrt(i)
             _ = math.sin(i)
@@ -61,43 +74,49 @@ class HardwareMonitorApp(tk.Tk):
         self.geometry("500x700")
         self.resizable(False, False)
 
-        # 言語設定（初期値は日本語）
         self.language = "ja"
-
-        self.label_frame = ttk.LabelFrame(self, text=self.get_text("System Information"), padding=10)
-        self.label_frame.pack(fill="both", expand=True, padx=10, pady=10)
-
         self.labels = {}
 
-        # ラベル初期化
-        all_info = {}
-        all_info.update(get_cpu_info_details())
-        all_info.update(get_memory_info())
-        all_info.update(get_gpu_info())
+        self.cpu_frame = ttk.LabelFrame(self, text="CPU", padding=10)
+        self.cpu_frame.pack(fill="both", expand=True, padx=10, pady=5)
 
-        for key in all_info:
-            lbl = ttk.Label(self.label_frame, text=f"{key}: ")
-            lbl.pack(anchor="w", padx=5, pady=2)
-            self.labels[key] = lbl
+        self.mem_frame = ttk.LabelFrame(self, text="Memory", padding=10)
+        self.mem_frame.pack(fill="both", expand=True, padx=10, pady=5)
 
-        # ベンチマークボタン
+        self.gpu_frame = ttk.LabelFrame(self, text="GPU", padding=10)
+        self.gpu_frame.pack(fill="both", expand=True, padx=10, pady=5)
+
+        self.storage_frame = ttk.LabelFrame(self, text="Storage", padding=10)
+        self.storage_frame.pack(fill="both", expand=True, padx=10, pady=5)
+
+        # 初期表示
+        self.build_labels()
+
         self.benchmark_btn = ttk.Button(self, text=self.get_text("Start CPU Benchmark"), command=self.run_benchmark)
         self.benchmark_btn.pack(pady=10)
 
         self.benchmark_result = ttk.Label(self, text=self.get_text("Score: ---"))
         self.benchmark_result.pack(pady=5)
 
-        # 言語変更ボタン
         self.language_btn = ttk.Button(self, text=self.get_text("Change Language"), command=self.toggle_language)
         self.language_btn.pack(pady=10)
 
-        # 更新ループ開始
         self.update_info()
 
+    def build_labels(self):
+        for frame, data in [
+            (self.cpu_frame, get_cpu_info_details()),
+            (self.mem_frame, get_memory_info()),
+            (self.gpu_frame, get_gpu_info()),
+            (self.storage_frame, get_storage_info())
+        ]:
+            for key in data:
+                lbl = ttk.Label(frame, text=f"{key}: {data[key]}")
+                lbl.pack(anchor="w", padx=5, pady=2)
+                self.labels[key] = lbl
+
     def get_text(self, text):
-        """指定されたテキストを現在の言語に基づいて翻訳"""
         translations = {
-            "System Information": {"ja": "システム情報", "en": "System Information"},
             "Start CPU Benchmark": {"ja": "CPUベンチマーク開始", "en": "Start CPU Benchmark"},
             "Score: ---": {"ja": "スコア: ---", "en": "Score: ---"},
             "Benchmarking...": {"ja": "ベンチマーク中...", "en": "Benchmarking..."},
@@ -110,35 +129,40 @@ class HardwareMonitorApp(tk.Tk):
         return translations.get(text, {}).get(self.language, text)
 
     def toggle_language(self):
-        """言語を切り替える"""
         self.language = "en" if self.language == "ja" else "ja"
         self.update_language()
 
     def update_language(self):
-        """UIのテキストを現在の言語に基づいて更新"""
-        self.label_frame.config(text=self.get_text("System Information"))
         self.benchmark_btn.config(text=self.get_text("Start CPU Benchmark"))
         self.benchmark_result.config(text=self.get_text("Score: ---"))
         self.language_btn.config(text=self.get_text("Change Language"))
 
     def update_info(self):
-        all_info = {}
-        all_info.update(get_cpu_info_details())
-        all_info.update(get_memory_info())
-        all_info.update(get_gpu_info())
+        sources = {
+            **get_cpu_info_details(),
+            **get_memory_info(),
+            **get_gpu_info(),
+            **get_storage_info()
+        }
 
         for key, label in self.labels.items():
-            label.config(text=f"{key}: {all_info.get(key, 'N/A')}")
-
+            if key in sources:
+                label.config(text=f"{key}: {sources[key]}")
         self.after(1000, self.update_info)
 
     def run_benchmark(self):
         self.benchmark_result.config(text=self.get_text("Benchmarking..."))
         self.update_idletasks()
         score = simple_cpu_benchmark()
-        self.benchmark_result.config(text=self.get_text("Score: {score} (iterations per second)").format(score=score))
-
+        self.benchmark_result.config(
+            text=self.get_text("Score: {score} (iterations per second)").format(score=score)
+        )
 
 if __name__ == "__main__":
-    app = HardwareMonitorApp()
-    app.mainloop()
+    try:
+        app = HardwareMonitorApp()
+        app.mainloop()
+    except Exception as e:
+        with open("error_log.txt", "w", encoding="utf-8") as f:
+            f.write(str(e))
+        raise
