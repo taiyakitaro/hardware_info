@@ -6,7 +6,7 @@ Pythonでコードを書きましたがまだまだ勉強中なので一部AIの
 <br><br>
 5/6追記:exeファイルのバージョンも配布しようとしたのですが、再起動を繰り返してしまうので<br>
 当面はVSCでの起動をお願いします。<br>
-<code>pip install psutil GPUtil py-cpuinfo</code><br>
+<code>pip pip install psutil py-cpuinfo gputil wmi </code><br>
 このライブラリで動くと思います。
 <br><br>
 5/9追記:GUIの表示をカテゴリごとに区切りました。視認性が多少良くなったかなと思います。
