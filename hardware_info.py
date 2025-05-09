@@ -19,11 +19,76 @@ def get_cpu_info_details():
     }
 
 def get_memory_info():
-    mem = psutil.virtual_memory()
-    return {
-        "Total Memory (GB)": round(mem.total / (1024**3), 2),
-        "Used Memory (%)": mem.percent
+    MEMORY_TYPE_MAP = {
+        0: "Unknown",
+        1: "Other",
+        2: "DRAM",
+        3: "Synchronous DRAM",
+        4: "Cache DRAM",
+        5: "EDO",
+        6: "EDRAM",
+        7: "VRAM",
+        8: "SRAM",
+        9: "RAM",
+        10: "ROM",
+        11: "Flash",
+        12: "EEPROM",
+        13: "FEPROM",
+        14: "EPROM",
+        15: "CDRAM",
+        16: "3DRAM",
+        17: "SDRAM",
+        18: "SGRAM",
+        19: "RDRAM",
+        20: "DDR",
+        21: "DDR2",
+        22: "DDR2 FB-DIMM",
+        24: "DDR3",
+        26: "DDR4"
     }
+
+    mem = psutil.virtual_memory()
+    memory_info = {
+        "Total Memory (GB)": round(mem.total / (1024**3), 2),
+        "Used Memory (%)": mem.percent,
+        "Used Memory (GB)": round(mem.used / (1024**3), 2)
+    }
+
+    try:
+        c = wmi.WMI()
+        physical_memories = c.Win32_PhysicalMemory()
+        if len(physical_memories) > 0:
+            # 最初のモジュールの情報を取得
+            memory = physical_memories[0]
+            memory_type = MEMORY_TYPE_MAP.get(memory.MemoryType, "Unknown")
+            memory_info["Memory Module 0"] = {
+                "Manufacturer": memory.Manufacturer.strip() if memory.Manufacturer else "Unknown",#メモリモジュール製造メーカー
+                "Type": memory_type,#DDR規格(DDR5・LPDDR5・LPDDR5X・LPDDR4・LPDDR4Xは非対応 ※unknownと表示(DDR5系はWMIの対応待ち・LPDDR4系は検証できず))
+
+                #"Capacity (GB)": round(int(memory.Capacity) / (1024**3), 2),#モジュールの容量
+                #"Speed (MHz)": memory.Speed if memory.Speed else "Unknown",#モジュールの速度
+                #"Serial Number": memory.SerialNumber.strip() if memory.SerialNumber else "Unknown",#シリアルナンバー
+                #"Part Number": memory.PartNumber.strip() if memory.PartNumber else "Unknown"#部品番号
+            }
+
+            # 2枚目のモジュールがあり、メーカーが異なる場合に追加
+            if len(physical_memories) > 1:
+                second_memory = physical_memories[1]
+                if second_memory.Manufacturer.strip() != memory.Manufacturer.strip():
+                    second_memory_type = MEMORY_TYPE_MAP.get(second_memory.MemoryType, "Unknown")
+                    memory_info["Memory Module 1"] = {
+                        "Manufacturer": second_memory.Manufacturer.strip() if second_memory.Manufacturer else "Unknown",#メモリモジュール製造メーカー
+                        "Type": second_memory_type,#DDR規格(DDR5・LPDDR5・LPDDR5X 非対応 ※unknownと表示)
+
+                        #"Capacity (GB)": round(int(second_memory.Capacity) / (1024**3), 2),
+                        #"Speed (MHz)": second_memory.Speed if second_memory.Speed else "Unknown",
+                        #"Serial Number": second_memory.SerialNumber.strip() if second_memory.SerialNumber else "Unknown",
+                        #"Part Number": second_memory.PartNumber.strip() if second_memory.PartNumber else "Unknown"
+                    }
+    except Exception as e:
+        memory_info["Memory Info Error"] = f"Error: {str(e)}"
+
+    return memory_info
 
 def get_gpu_info():
     info = {}
@@ -50,7 +115,7 @@ def get_storage_info():
             info[f"Storage {i} Model"] = disk.Model
             info[f"Storage {i} Interface"] = disk.InterfaceType
             info[f"Storage {i} Size (GB)"] = round(int(disk.Size) / (1024**3), 2)
-            # NVMeバージョン等はWMIでは困難
+            # NVMeバージョン(PCIE vr.)等はWMIでは困難=> 今後の実装に期待
     except Exception as e:
         info["Storage Error"] = f"Error: {str(e)}"
     return info
@@ -71,7 +136,7 @@ class HardwareMonitorApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Hardware Monitor + Benchmark")
-        self.geometry("500x700")
+        self.geometry("500x750")
         self.resizable(False, False)
 
         self.language = "ja"
@@ -103,6 +168,7 @@ class HardwareMonitorApp(tk.Tk):
 
         self.update_info()
 
+    # GUI　ラベル
     def build_labels(self):
         for frame, data in [
             (self.cpu_frame, get_cpu_info_details()),
@@ -115,6 +181,7 @@ class HardwareMonitorApp(tk.Tk):
                 lbl.pack(anchor="w", padx=5, pady=2)
                 self.labels[key] = lbl
 
+    # 言語切り替えのための場所
     def get_text(self, text):
         translations = {
             "Start CPU Benchmark": {"ja": "CPUベンチマーク開始", "en": "Start CPU Benchmark"},
@@ -124,7 +191,30 @@ class HardwareMonitorApp(tk.Tk):
                 "ja": "スコア: {score}（1秒間に処理した回数）",
                 "en": "Score: {score} (iterations per second)"
             },
-            "Change Language": {"ja": "言語を変更", "en": "Change Language"}
+            #プロセッサー
+            "Change Language": {"ja": "言語を変更", "en": "Change Language"},
+            "Processor": {"ja": "プロセッサ", "en": "Processor"},
+            "Physical Cores": {"ja": "物理コア数", "en": "Physical Cores"},
+            "Total Cores": {"ja": "総コア数", "en": "Total Cores"},
+            "Max Frequency (MHz)": {"ja": "最大周波数 (MHz)", "en": "Max Frequency (MHz)"},
+            "Current Frequency (MHz)": {"ja": "現在の周波数 (MHz)", "en": "Current Frequency (MHz)"},
+            "CPU Usage (%)": {"ja": "CPU使用率 (%)", "en": "CPU Usage (%)"},
+            
+            #メモリー
+            "Total Memory (GB)": {"ja": "総メモリ (GB)", "en": "Total Memory (GB)"},
+            "Used Memory (%)": {"ja": "使用メモリ率 (%)", "en": "Used Memory (%)"},
+            "Used Memory (GB)": {"ja": "使用メモリ (GB)", "en": "Used Memory (GB)"},
+            "Manufacturer":{"ja":"モジュールメーカー", "en": "module manufacturer"},
+            "Type": {"ja": "DRAMタイプ","TYPE":"DRAM Type"},
+            
+            #NVIDIA GPU
+            "NVIDIA GPU Error": {"ja": "NVIDIA GPUエラー", "en": "NVIDIA GPU Error"},
+
+            #ストレージ
+            "Storage Error": {"ja": "ストレージエラー", "en": "Storage Error"},
+            "Storage {i} Model": {"ja": "ストレージ {i} モデル", "en": "Storage {i} Model"},
+            "Storage {i} Interface": {"ja": "ストレージ {i} インターフェース", "en": "Storage {i} Interface"},
+            "Storage {i} Size (GB)": {"ja": "ストレージ {i} サイズ (GB)", "en": "Storage {i} Size (GB)"}
         }
         return translations.get(text, {}).get(self.language, text)
 
@@ -147,7 +237,8 @@ class HardwareMonitorApp(tk.Tk):
 
         for key, label in self.labels.items():
             if key in sources:
-                label.config(text=f"{key}: {sources[key]}")
+                translated_key = self.get_text(key)
+                label.config(text=f"{translated_key}: {sources[key]}")
         self.after(1000, self.update_info)
 
     def run_benchmark(self):
